@@ -130,6 +130,9 @@ function dbus_str(value) {
     };
 }
 
+client.closeRegisterDialog = false;
+client.dfd = cockpit.defer();
+
 /* Overall flow is as follows:
 
 Preconditions:
@@ -141,7 +144,6 @@ Preconditions:
 3. if an option is different than what's in the config, we set the config option
  */
 client.registerSystem = subscriptionDetails => {
-    const dfd = cockpit.defer();
     // Note: when values are not specified we force use of default
     // values. Otherwise old and obsolete values from rhsm.conf could be used.
     const connection_options = {
@@ -277,7 +279,7 @@ client.registerSystem = subscriptionDetails => {
             .catch(error => {
                 console.error('error registering', error);
                 registered = false;
-                dfd.reject(parseErrorMessage(error));
+                client.dfd.reject(parseErrorMessage(error));
             })
             .then(() => {
                 console.debug('stopping registration server');
@@ -285,7 +287,7 @@ client.registerSystem = subscriptionDetails => {
             })
             .catch(error => {
                 console.error('error stopping registration bus', error);
-                dfd.reject(parseErrorMessage(error));
+                client.dfd.reject(parseErrorMessage(error));
             })
             .then(() => {
                 if (registered) {
@@ -335,13 +337,13 @@ client.registerSystem = subscriptionDetails => {
                         attachService.AutoAttach('', proxy_options, userLang)
                             .catch(error => {
                                 console.error('error during autoattach', error);
-                                dfd.reject(parseErrorMessage(error));
+                                client.dfd.reject(parseErrorMessage(error));
                             });
                     } else {
                         attachService.AutoAttach('', {}, userLang)
                             .catch(error => {
                                 console.error('error during autoattach', error);
-                                dfd.reject(parseErrorMessage(error));
+                                client.dfd.reject(parseErrorMessage(error));
                             });
                     }
                 }
@@ -352,13 +354,13 @@ client.registerSystem = subscriptionDetails => {
             })
             .then(() => {
                 console.debug('requesting update');
+                client.closeRegisterDialog = true;
                 requestUpdate();
-                dfd.resolve();
             });
     });
 
     requestUpdate();
-    return dfd.promise();
+    return client.dfd.promise();
 };
 
 client.unregisterSystem = () => {
@@ -427,6 +429,10 @@ client.getSubscriptionStatus = () => {
             .then(result => {
                 const status = JSON.parse(result);
                 client.subscriptionStatus.status = status.status;
+                if (client.closeRegisterDialog) {
+                    client.dfd.resolve();
+                    client.closeRegisterDialog = false;
+                }
             })
             .catch(() => {
                 client.subscriptionStatus.status = 'Unknown';
