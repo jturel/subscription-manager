@@ -131,7 +131,6 @@ function dbus_str(value) {
 }
 
 client.closeRegisterDialog = false;
-client.dfd = cockpit.defer();
 
 /* Overall flow is as follows:
 
@@ -144,6 +143,7 @@ Preconditions:
 3. if an option is different than what's in the config, we set the config option
  */
 client.registerSystem = subscriptionDetails => {
+    const dfd = cockpit.defer();
     // Note: when values are not specified we force use of default
     // values. Otherwise old and obsolete values from rhsm.conf could be used.
     const connection_options = {
@@ -279,7 +279,7 @@ client.registerSystem = subscriptionDetails => {
             .catch(error => {
                 console.error('error registering', error);
                 registered = false;
-                client.dfd.reject(parseErrorMessage(error));
+                dfd.reject(parseErrorMessage(error));
             })
             .then(() => {
                 console.debug('stopping registration server');
@@ -287,7 +287,7 @@ client.registerSystem = subscriptionDetails => {
             })
             .catch(error => {
                 console.error('error stopping registration bus', error);
-                client.dfd.reject(parseErrorMessage(error));
+                dfd.reject(parseErrorMessage(error));
             })
             .then(() => {
                 if (registered) {
@@ -337,13 +337,13 @@ client.registerSystem = subscriptionDetails => {
                         attachService.AutoAttach('', proxy_options, userLang)
                             .catch(error => {
                                 console.error('error during autoattach', error);
-                                client.dfd.reject(parseErrorMessage(error));
+                                dfd.reject(parseErrorMessage(error));
                             });
                     } else {
                         attachService.AutoAttach('', {}, userLang)
                             .catch(error => {
                                 console.error('error during autoattach', error);
-                                client.dfd.reject(parseErrorMessage(error));
+                                dfd.reject(parseErrorMessage(error));
                             });
                     }
                 }
@@ -355,12 +355,12 @@ client.registerSystem = subscriptionDetails => {
             .then(() => {
                 console.debug('requesting update');
                 client.closeRegisterDialog = true;
-                requestUpdate();
+                requestUpdate(dfd);
             });
     });
 
     requestUpdate();
-    return client.dfd.promise();
+    return dfd.promise();
 };
 
 client.unregisterSystem = () => {
@@ -391,7 +391,7 @@ const subscriptionStatusValues = [
     'RHSM_PARTIALLY_VALID',
     'RHSM_REGISTRATION_REQUIRED'
 ];
-function requestUpdate() {
+function requestUpdate(dfd = null) {
     legacyService.wait(() => {
         legacyService.call('/EntitlementStatus',
             'com.redhat.SubscriptionManager.EntitlementStatus',
@@ -403,7 +403,7 @@ function requestUpdate() {
             })
             .done(result => {
                 client.subscriptionStatus.serviceStatus = subscriptionStatusValues[result[0]];
-                client.getSubscriptionStatus();
+                client.getSubscriptionStatus(dfd);
             })
             .catch(ex => {
                 statusUpdateFailed("EntitlementStatus.check_status() failed:", ex);
@@ -418,7 +418,8 @@ function requestUpdate() {
 
 let gettingStatus = false;
 /* get subscription summary */
-client.getSubscriptionStatus = () => {
+client.getSubscriptionStatus = function(dfd = null) {
+    this.dfd = dfd;
     if (gettingStatus) {
         return;
     }
@@ -429,8 +430,8 @@ client.getSubscriptionStatus = () => {
             .then(result => {
                 const status = JSON.parse(result);
                 client.subscriptionStatus.status = status.status;
-                if (client.closeRegisterDialog) {
-                    client.dfd.resolve();
+                if (this.dfd && client.closeRegisterDialog) {
+                    this.dfd.resolve();
                     client.closeRegisterDialog = false;
                 }
             })
